@@ -801,6 +801,31 @@ func (g *genConversion) doBuiltin(inType, outType *types.Type, sw *generator.Sni
 	}
 }
 
+func (g *genConversion) doCompileErrorOnMissingConversion(inType, outType *types.Type, sw *generator.SnippetWriter) {
+	sw.Do("// FIXME: Provide conversion function to convert $.inType|raw$ to $.outType|raw$;\n",
+		argsFromType(inType, outType))
+	if len(g.manualConversions) == 0 {
+		sw.Do("// no manual conversion functions are currently provided.\n", nil)
+	} else {
+		sw.Do("// the currently provided manual conversion functions are\n", nil)
+		pairs := make([]conversionPair, 0, len(g.manualConversions))
+		for pair := range g.manualConversions {
+			pairs = append(pairs, pair)
+		}
+		sort.Slice(pairs, func(i, j int) bool {
+			return g.manualConversions[pairs[i]].String() < g.manualConversions[pairs[j]].String()
+		})
+		for _, pair := range pairs {
+			sw.Do("//  - $.func|raw$() ($.inType|raw$ to $.outType|raw$)\n", generator.Args{
+				"inType":  pair.inType,
+				"outType": pair.outType,
+				"func":    g.manualConversions[pair],
+			})
+		}
+	}
+	sw.Do("compileErrorOnMissingConversion()\n", nil)
+}
+
 func (g *genConversion) doMap(inType, outType *types.Type, sw *generator.SnippetWriter) {
 	sw.Do("*out = make($.|raw$, len(*in))\n", outType)
 	if isDirectlyAssignable(inType.Key, outType.Key) {
@@ -825,9 +850,7 @@ func (g *genConversion) doMap(inType, outType *types.Type, sw *generator.Snippet
 				sw.Do("newVal := new($.|raw$)\n", outType.Elem)
 				sw.Do("if err := "+nameTmpl+"(&val, newVal, s); err != nil {\n", argsFromType(inType.Elem, outType.Elem))
 			} else {
-				args := argsFromType(inType.Elem, outType.Elem)
-				sw.Do("// FIXME: Provide conversion function to convert $.inType|raw$ to $.outType|raw$\n", args)
-				sw.Do("compileErrorOnMissingConversion()\n", nil)
+				g.doCompileErrorOnMissingConversion(inType.Elem, outType.Elem, sw)
 				conversionExists = false
 			}
 			if conversionExists {
@@ -867,9 +890,7 @@ func (g *genConversion) doSlice(inType, outType *types.Type, sw *generator.Snipp
 			} else if g.convertibleOnlyWithinPackage(inType.Elem, outType.Elem) {
 				sw.Do("if err := "+nameTmpl+"(&(*in)[i], &(*out)[i], s); err != nil {\n", argsFromType(inType.Elem, outType.Elem))
 			} else {
-				args := argsFromType(inType.Elem, outType.Elem)
-				sw.Do("// FIXME: Provide conversion function to convert $.inType|raw$ to $.outType|raw$\n", args)
-				sw.Do("compileErrorOnMissingConversion()\n", nil)
+				g.doCompileErrorOnMissingConversion(inType.Elem, outType.Elem, sw)
 				conversionExists = false
 			}
 			if conversionExists {
@@ -986,9 +1007,7 @@ func (g *genConversion) doStruct(inType, outType *types.Type, sw *generator.Snip
 			if g.convertibleOnlyWithinPackage(inMemberType, outMemberType) {
 				sw.Do("if err := "+nameTmpl+"(&in.$.name$, &out.$.name$, s); err != nil {\n", args)
 			} else {
-				args := argsFromType(inMemberType, outMemberType)
-				sw.Do("// FIXME: Provide conversion function to convert $.inType|raw$ to $.outType|raw$\n", args)
-				sw.Do("compileErrorOnMissingConversion()\n", nil)
+				g.doCompileErrorOnMissingConversion(inMemberType, outMemberType, sw)
 				conversionExists = false
 			}
 			if conversionExists {
@@ -1007,9 +1026,7 @@ func (g *genConversion) doStruct(inType, outType *types.Type, sw *generator.Snip
 				if g.convertibleOnlyWithinPackage(inMemberType, outMemberType) {
 					sw.Do("if err := "+nameTmpl+"(&in.$.name$, &out.$.name$, s); err != nil {\n", args)
 				} else {
-					args := argsFromType(inMemberType, outMemberType)
-					sw.Do("// FIXME: Provide conversion function to convert $.inType|raw$ to $.outType|raw$\n", args)
-					sw.Do("compileErrorOnMissingConversion()\n", nil)
+					g.doCompileErrorOnMissingConversion(inMemberType, outMemberType, sw)
 					conversionExists = false
 				}
 				if conversionExists {
@@ -1022,9 +1039,7 @@ func (g *genConversion) doStruct(inType, outType *types.Type, sw *generator.Snip
 			if g.convertibleOnlyWithinPackage(inMemberType, outMemberType) {
 				sw.Do("if err := "+nameTmpl+"(&in.$.name$, &out.$.name$, s); err != nil {\n", args)
 			} else {
-				args := argsFromType(inMemberType, outMemberType)
-				sw.Do("// FIXME: Provide conversion function to convert $.inType|raw$ to $.outType|raw$\n", args)
-				sw.Do("compileErrorOnMissingConversion()\n", nil)
+				g.doCompileErrorOnMissingConversion(inMemberType, outMemberType, sw)
 				conversionExists = false
 			}
 			if conversionExists {
@@ -1065,9 +1080,7 @@ func (g *genConversion) doPointer(inType, outType *types.Type, sw *generator.Sni
 		} else if g.convertibleOnlyWithinPackage(inType.Elem, outType.Elem) {
 			sw.Do("if err := "+nameTmpl+"(*in, *out, s); err != nil {\n", argsFromType(inType.Elem, outType.Elem))
 		} else {
-			args := argsFromType(inType.Elem, outType.Elem)
-			sw.Do("// FIXME: Provide conversion function to convert $.inType|raw$ to $.outType|raw$\n", args)
-			sw.Do("compileErrorOnMissingConversion()\n", nil)
+			g.doCompileErrorOnMissingConversion(inType.Elem, outType.Elem, sw)
 			conversionExists = false
 		}
 		if conversionExists {
