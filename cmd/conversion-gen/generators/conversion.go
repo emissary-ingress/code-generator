@@ -1210,10 +1210,39 @@ func (g *genConversion) setZeroValue(outMember types.Member, sw *generator.Snipp
 }
 
 func isDirectlyAssignable(inType, outType *types.Type) bool {
-	// TODO: This should maybe check for actual assignability between the two
-	// types, rather than superficial traits that happen to indicate it is
-	// assignable in the ways we currently use this code.
-	return inType.IsAssignable() && (inType.IsPrimitive() || isSamePackage(inType, outType))
+	// This is different than types.Type.IsAssignable(), because that checks *deep*
+	// assignability; we only care about shallow assignability.
+	inType, outType = unwrapAlias(inType), unwrapAlias(outType)
+	if inType.Kind != outType.Kind {
+		return false
+	}
+	switch inType.Kind {
+	case types.Builtin:
+		return inType.Name == outType.Name
+	case types.Struct:
+		if len(inType.Members) != len(outType.Members) {
+			return false
+		}
+		for i := range inType.Members {
+			if !(inType.Members[i].Name == outType.Members[i].Name &&
+				inType.Members[i].Embedded == outType.Members[i].Embedded &&
+				inType.Members[i].Type.Kind != outType.Members[i].Type.Kind &&
+				inType.Members[i].Type.Name != outType.Members[i].Type.Name) {
+				return false
+			}
+		}
+		return true
+	case types.Map:
+		return inType.Elem.Kind == outType.Elem.Kind &&
+			inType.Elem.Name == outType.Elem.Name &&
+			inType.Key.Kind == outType.Key.Kind &&
+			inType.Key.Name == outType.Key.Name
+	case types.Slice, types.Pointer:
+		return inType.Elem.Kind == outType.Elem.Kind &&
+			inType.Elem.Name == outType.Elem.Name
+	default:
+		return false
+	}
 }
 
 func isSamePackage(inType, outType *types.Type) bool {
