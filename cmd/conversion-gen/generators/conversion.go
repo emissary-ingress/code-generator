@@ -78,6 +78,19 @@ const (
 	//   this function should never be performed on struct members; as if
 	//   "+k8s:conversion-gen=false" were added to the source struct member.
 	conversionFnTagName = "k8s:conversion-fn"
+	// On a struct member:
+	//
+	//   "+k8s:conversion-gen:rename=<peer-name>" indicates that the
+	//   equivalent field in the equivalent type in the <peer-pkg> is named
+	//   <peer-name>.  This applies in both directions; e.g. setting this
+	//   marker on a field in pkg1.Foo will affect both
+	//   "Convert_pkg1_Foo_To_pkg2_Foo" and "Convert_pkg2_Foo_To_pkg1_Foo";
+	//   it is not necessary to set in both packages.  This will not prevent
+	//   a field from pairing with an identically named field; it does not
+	//   mask the original name, it adds to it.  As such, it may be given
+	//   multiple times, in order to facilitate generating conversions with
+	//   many different peer packages.
+	renameTagName = "k8s:conversion-gen:rename"
 )
 
 func extractTagValues(tagName string, comments []string) ([]string, error) {
@@ -118,6 +131,10 @@ func isDrop(comments []string) (bool, error) {
 		return false, err
 	}
 	return len(values) == 1 && values[0] == "drop", nil
+}
+
+func extractRenameTags(comments []string) []string {
+	return gengo.ExtractCommentTags("+", comments)[renameTagName]
 }
 
 // TODO: This is created only to reduce number of changes in a single PR.
@@ -484,13 +501,20 @@ func (e equalMemoryTypes) equal(a, b *types.Type, alreadyVisitedStack []*types.T
 	return false, true
 }
 
-func findMember(t *types.Type, name string) (types.Member, bool) {
+func findMember(t *types.Type, names ...string) (types.Member, bool) {
 	if t.Kind != types.Struct {
 		return types.Member{}, false
 	}
 	for _, member := range t.Members {
-		if member.Name == name {
-			return member, true
+		for _, name := range names {
+			if member.Name == name {
+				return member, true
+			}
+			for _, memberName := range extractRenameTags(member.CommentLines) {
+				if memberName == name {
+					return member, true
+				}
+			}
 		}
 	}
 	return types.Member{}, false
@@ -1012,7 +1036,7 @@ func (g *genConversion) doStruct(inType, outType *types.Type, sw *generator.Snip
 			sw.Do("// INFO: in."+inMember.Name+" opted out of conversion generation\n", nil)
 			continue
 		}
-		outMember, found := findMember(outType, inMember.Name)
+		outMember, found := findMember(outType, append([]string{inMember.Name}, extractRenameTags(inMember.CommentLines)...)...)
 		if !found {
 			// This field doesn't exist in the peer.
 			sw.Do("// WARNING: in."+inMember.Name+" requires manual conversion: does not exist in peer-type\n", nil)
@@ -1045,7 +1069,9 @@ func (g *genConversion) doStruct(inType, outType *types.Type, sw *generator.Snip
 			outMemberType = &copied
 		}
 
-		args := argsFromType(inMemberType, outMemberType).With("name", inMember.Name)
+		args := argsFromType(inMemberType, outMemberType).
+			With("inName", inMember.Name).
+			With("outName", outMember.Name)
 
 		// try a direct memory copy for any type that has exactly equivalent values
 		if g.useUnsafe.Equal(inMemberType, outMemberType) {
@@ -1054,13 +1080,13 @@ func (g *genConversion) doStruct(inType, outType *types.Type, sw *generator.Snip
 				With("SliceHeader", types.Ref("reflect", "SliceHeader"))
 			switch inMemberType.Kind {
 			case types.Pointer:
-				sw.Do("out.$.name$ = ($.outType|raw$)($.Pointer|raw$(in.$.name$))\n", args)
+				sw.Do("out.$.outName$ = ($.outType|raw$)($.Pointer|raw$(in.$.inName$))\n", args)
 				continue
 			case types.Map:
-				sw.Do("out.$.name$ = *(*$.outType|raw$)($.Pointer|raw$(&in.$.name$))\n", args)
+				sw.Do("out.$.outName$ = *(*$.outType|raw$)($.Pointer|raw$(&in.$.inName$))\n", args)
 				continue
 			case types.Slice:
-				sw.Do("out.$.name$ = *(*$.outType|raw$)($.Pointer|raw$(&in.$.name$))\n", args)
+				sw.Do("out.$.outName$ = *(*$.outType|raw$)($.Pointer|raw$(&in.$.inName$))\n", args)
 				continue
 			}
 		}
@@ -1085,7 +1111,7 @@ func (g *genConversion) doStruct(inType, outType *types.Type, sw *generator.Snip
 			}
 			if !copyOnly || !isDirectlyConvertible(inMember.Type, outMember.Type) {
 				args["function"] = function
-				sw.Do("if err := $.function|raw$(&in.$.name$, &out.$.name$, s); err != nil {\n", args)
+				sw.Do("if err := $.function|raw$(&in.$.inName$, &out.$.outName$, s); err != nil {\n", args)
 				sw.Do("return err\n", nil)
 				sw.Do("}\n", nil)
 				continue
@@ -1103,24 +1129,24 @@ func (g *genConversion) doStruct(inType, outType *types.Type, sw *generator.Snip
 
 		if isDirectlyConvertible(inMember.Type, outMember.Type) {
 			if isDirectlyAssignable(inMember.Type, outMember.Type) {
-				sw.Do("out.$.name$ = in.$.name$\n", args)
+				sw.Do("out.$.outName$ = in.$.inName$\n", args)
 			} else {
-				sw.Do("out.$.name$ = $.outType|raw$(in.$.name$)\n", args)
+				sw.Do("out.$.outName$ = $.outType|raw$(in.$.inName$)\n", args)
 			}
 			continue
 		}
 
 		switch inMemberType.Kind {
 		case types.Map, types.Slice, types.Pointer:
-			sw.Do("if in.$.name$ != nil {\n", args)
-			sw.Do("in, out := &in.$.name$, &out.$.name$\n", args)
+			sw.Do("if in.$.inName$ != nil {\n", args)
+			sw.Do("in, out := &in.$.inName$, &out.$.outName$\n", args)
 			g.generateFor(inMemberType, outMemberType, sw)
 			sw.Do("} else {\n", nil)
-			sw.Do("out.$.name$ = nil\n", args)
+			sw.Do("out.$.outName$ = nil\n", args)
 			sw.Do("}\n", nil)
 		default:
 			if g.convertibleOnlyWithinPackage(inMemberType, outMemberType) {
-				sw.Do("if err := "+nameTmpl+"(&in.$.name$, &out.$.name$, s); err != nil {\n", args)
+				sw.Do("if err := "+nameTmpl+"(&in.$.inName$, &out.$.outName$, s); err != nil {\n", args)
 				sw.Do("return err\n", nil)
 				sw.Do("}\n", nil)
 			} else {
