@@ -35,17 +35,48 @@ import (
 
 // These are the comment tags that carry parameters for conversion generation.
 const (
-	// e.g., "+k8s:conversion-gen=<peer-pkg>" in doc.go, where <peer-pkg> is the
-	// import path of the package the peer types are defined in.
-	// e.g., "+k8s:conversion-gen=false" in a type's comment will let
-	// conversion-gen skip that type.
+	// In doc.go:
+	//
+	//   "+k8s:conversion-gen=<peer-pkg>" indicates that  <peer-pkg> is the
+	//   import path of the package the peer types are defined in.
+	//
+	// On a type:
+	//
+	//   "+k8s:conversion-gen=false" on type <src> causes conversion-gen to
+	//   not attempt to generate any "Convert_<src>_To_<dst>" functions.  It
+	//   may still generate other functions that call such a function if
+	//   necessary; in that case it would be the user's responsibility to
+	//   manually write the function.
+	//
+	// On a struct member:
+	//
+	//   "+k8s:conversion-gen=false" on a member within <src> struct causes
+	//   the generated "Convert_<src>_To_<dst>" functions to ignore that
+	//   field, not attempting to set <dst>.<fieldname>.
 	tagName = "k8s:conversion-gen"
-	// e.g. "+k8s:conversion-gen:explicit-from=net/url.Values" in the type comment
-	// will result in generating conversion from net/url.Values.
+	// On a type:
+	//
+	//   "+k8s:conversion-gen:explicit-from=net/url.Values" results in
+	//   generating conversion from net/url.Values.  This is a special case;
+	//   other types are not supported.
 	explicitFromTagName = "k8s:conversion-gen:explicit-from"
-	// e.g., "+k8s:conversion-gen-external-types=<type-pkg>" in doc.go, where
-	// <type-pkg> is the relative path to the package the types are defined in.
+	// In doc.go:
+	//
+	//   "+k8s:conversion-gen-external-types=<type-pkg>" indicates that
+	//   <type-pkg> is the relative path to the package the types are
+	//   defined in.
 	externalTypesTagName = "k8s:conversion-gen-external-types"
+	// On a "Convert_<src>_To_<dst>" function:
+	//
+	//   "+k8s:conversion-fn=copy-only" indicates that the function is
+	//   merely blindly copying data (not doing any higher-level conversion
+	//   logic), and that it is OK to optimize the function away if
+	//   conversion-gen determines the types to be memory-equivalent.
+	//
+	//   "+k8s:conversion-fn=drop" indicates that the conversion done by
+	//   this function should never be performed on struct members; as if
+	//   "+k8s:conversion-gen=false" were added to the source struct member.
+	conversionFnTagName = "k8s:conversion-fn"
 )
 
 func extractTag(comments []string) []string {
@@ -61,12 +92,12 @@ func extractExternalTypesTag(comments []string) []string {
 }
 
 func isCopyOnly(comments []string) bool {
-	values := gengo.ExtractCommentTags("+", comments)["k8s:conversion-fn"]
+	values := gengo.ExtractCommentTags("+", comments)[conversionFnTagName]
 	return len(values) == 1 && values[0] == "copy-only"
 }
 
 func isDrop(comments []string) bool {
-	values := gengo.ExtractCommentTags("+", comments)["k8s:conversion-fn"]
+	values := gengo.ExtractCommentTags("+", comments)[conversionFnTagName]
 	return len(values) == 1 && values[0] == "drop"
 }
 
