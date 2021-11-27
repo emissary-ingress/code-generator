@@ -946,20 +946,23 @@ func (g *genConversion) doSlice(inType, outType *types.Type, sw *generator.Snipp
 			sw.Do("(*out)[i] = (*in)[i]\n", nil)
 		} else if isDirectlyConvertible(inType.Elem, outType.Elem) {
 			sw.Do("(*out)[i] = $.|raw$((*in)[i])\n", outType.Elem)
+		} else if function, ok := g.preexists(inType.Elem, outType.Elem); ok {
+			sw.Do("if err := $.|raw$(&(*in)[i], &(*out)[i], s); err != nil {\n", function)
+			sw.Do("return err\n", nil)
+			sw.Do("}\n", nil)
+		} else if g.convertibleOnlyWithinPackage(inType.Elem, outType.Elem) {
+			sw.Do("if err := "+nameTmpl+"(&(*in)[i], &(*out)[i], s); err != nil {\n", argsFromType(inType.Elem, outType.Elem))
+			sw.Do("return err\n", nil)
+			sw.Do("}\n", nil)
+		} else if outType.Elem.Kind == types.Pointer {
+			sw.Do("if (*in)[i] != nil {\n", nil)
+			sw.Do("in, out := &(*in)[i], &(*out)[i]\n", nil)
+			g.generateFor(inType.Elem, outType.Elem, sw)
+			sw.Do("} else {\n", nil)
+			sw.Do("(*in)[i] = nil\n", nil)
+			sw.Do("}\n", nil)
 		} else {
-			conversionExists := true
-			if function, ok := g.preexists(inType.Elem, outType.Elem); ok {
-				sw.Do("if err := $.|raw$(&(*in)[i], &(*out)[i], s); err != nil {\n", function)
-			} else if g.convertibleOnlyWithinPackage(inType.Elem, outType.Elem) {
-				sw.Do("if err := "+nameTmpl+"(&(*in)[i], &(*out)[i], s); err != nil {\n", argsFromType(inType.Elem, outType.Elem))
-			} else {
-				g.doCompileErrorOnMissingConversion(inType.Elem, outType.Elem, sw)
-				conversionExists = false
-			}
-			if conversionExists {
-				sw.Do("return err\n", nil)
-				sw.Do("}\n", nil)
-			}
+			g.doCompileErrorOnMissingConversion(inType.Elem, outType.Elem, sw)
 		}
 		sw.Do("}\n", nil)
 	}
