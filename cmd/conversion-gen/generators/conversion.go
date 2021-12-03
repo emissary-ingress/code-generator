@@ -48,7 +48,7 @@ const (
 	//   "+k8s:conversion-gen=false" on type <src> causes conversion-gen to
 	//   not attempt to generate any "Convert_<src>_To_<dst>" functions.  It
 	//   may still generate other functions that call such a function if
-	//   nescessary; in that case it would be the user's responsibility to
+	//   necessary; in that case it would be the user's responsibility to
 	//   manually write the function.
 	//
 	// On a struct member:
