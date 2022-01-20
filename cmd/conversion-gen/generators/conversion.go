@@ -568,8 +568,9 @@ func (n *namerPlusImportTracking) Name(t *types.Type) string {
 // These criteria are:
 //  1. One of the types is in the package that we're generating conversions for, and
 //  2. that type has not opted out of conversion with +k8s:conversion-gen=false, and
-//  3. that type a struct type, and
-//  4. that type is exported.
+//  3. both types are exported named types, and
+//  4. both types are (after resolving aliases) of the same kind, and
+//  5. that kind is a Builtin, Map, Slice, Struct, or Pointer.
 func (g *genConversion) convertibleOnlyWithinPackage(inType, outType *types.Type) bool {
 	var t *types.Type
 	var other *types.Type
@@ -579,10 +580,12 @@ func (g *genConversion) convertibleOnlyWithinPackage(inType, outType *types.Type
 		t, other = outType, inType
 	}
 
+	// 1.
 	if t.Name.Package != g.typesPackage {
 		return false
 	}
-	// If the type has opted out, skip it.
+
+	// 2. If the type has opted out, skip it.
 	tagvals := extractTag(t.CommentLines)
 	if tagvals != nil {
 		if tagvals[0] != "false" {
@@ -591,14 +594,27 @@ func (g *genConversion) convertibleOnlyWithinPackage(inType, outType *types.Type
 		klog.V(5).Infof("type %v requests no conversion generation, skipping", t)
 		return false
 	}
-	// TODO: Consider generating functions for other kinds too.
-	if t.Kind != types.Struct {
+
+	// 3. Filter out private types.
+	if namer.IsPrivateGoName(t.Name.Name) || namer.IsPrivateGoName(other.Name.Name) {
 		return false
 	}
-	// Also, filter out private types.
-	if namer.IsPrivateGoName(other.Name.Name) {
+
+	// 4. If the types aren't of the same kind, skip it.
+	t, other = unwrapAlias(t), unwrapAlias(other)
+	if t.Kind != other.Kind {
 		return false
 	}
+
+	// 5. If that kind isn't one that we support, skip it.
+	switch t.Kind {
+	case types.Builtin, types.Map, types.Slice, types.Struct, types.Pointer:
+		// ok
+	default:
+		// skip it
+		return false
+	}
+
 	return true
 }
 
