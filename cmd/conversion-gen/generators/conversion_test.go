@@ -1,11 +1,12 @@
 package generators
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 
-	"k8s.io/gengo/parser"
-	"k8s.io/gengo/types"
+	"k8s.io/gengo/v2/parser"
+	"k8s.io/gengo/v2/types"
 
 	"k8s.io/code-generator/cmd/conversion-gen/generators/internal/testtypes"
 	"k8s.io/code-generator/cmd/conversion-gen/generators/internal/testtypes/example1"
@@ -23,18 +24,29 @@ func reflectIsDirectlyConvertible(outType, inType reflect.Type) bool {
 
 func TestDirect(t *testing.T) {
 	builder := parser.New()
-	if err := builder.AddDir("./internal/testtypes"); err != nil {
-		t.Fatal(err)
-	}
-	if err := builder.AddDir("./internal/testtypes/example1"); err != nil {
-		t.Fatal(err)
-	}
-	if err := builder.AddDir("./internal/testtypes/example2"); err != nil {
-		t.Fatal(err)
-	}
-	testPackages, err := builder.FindTypes()
+
+	err := builder.LoadPackages("./internal/testtypes")
+
 	if err != nil {
-		t.Fatal(err)
+		t.Fatal(fmt.Errorf("couldn't load ./internal/testtypes: %s", err))
+	}
+
+	err = builder.LoadPackages("./internal/testtypes/example1")
+
+	if err != nil {
+		t.Fatal(fmt.Errorf("couldn't load ./internal/testtypes/example1: %s", err))
+	}
+
+	err = builder.LoadPackages("./internal/testtypes/example2")
+
+	if err != nil {
+		t.Fatal(fmt.Errorf("couldn't load ./internal/testtypes/example2: %s", err))
+	}
+
+	testPackages, err := builder.NewUniverse()
+
+	if err != nil {
+		t.Fatal(fmt.Errorf("couldn't create universe: %s", err))
 	}
 
 	typeMapReflect := map[string]reflect.Type{

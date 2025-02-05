@@ -20,7 +20,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"path/filepath"
+	"path"
 	"reflect"
 	"sort"
 	"strings"
@@ -31,9 +31,6 @@ import (
 	"k8s.io/gengo/v2/namer"
 	"k8s.io/gengo/v2/types"
 	"k8s.io/klog/v2"
-
-	conversionargs "k8s.io/code-generator/cmd/conversion-gen/args"
-	genutil "k8s.io/code-generator/pkg/util"
 )
 
 // These are the comment tags that carry parameters for conversion generation.
@@ -118,7 +115,7 @@ func isDrop(comments []string) bool {
 }
 
 func extractRenameTags(comments []string) []string {
-	return types.ExtractCommentTags("+", comments)[renameTagName]
+	return gengo.ExtractCommentTags("+", comments)[renameTagName]
 }
 
 // TODO: This is created only to reduce number of changes in a single PR.
@@ -1226,11 +1223,20 @@ func haveIdenticalUnderlyingType(outType, inType *types.Type, cmpTags bool) bool
 		// methods but still need a run time conversion.
 		return len(inType.Methods) == 0 && len(outType.Methods) == 0
 	case types.Func:
-		outParams := outType.Signature.Parameters
+		outParams := make([]*types.Type, len(outType.Signature.Parameters))
+		for i, param := range outType.Signature.Parameters {
+			outParams[i] = param.Type
+		}
+
 		if outType.Signature.Receiver != nil {
 			outParams = append([]*types.Type{outType.Signature.Receiver}, outParams...)
 		}
-		inParams := inType.Signature.Parameters
+
+		inParams := make([]*types.Type, len(inType.Signature.Parameters))
+		for i, param := range inType.Signature.Parameters {
+			inParams[i] = param.Type
+		}
+
 		if inType.Signature.Receiver != nil {
 			inParams = append([]*types.Type{inType.Signature.Receiver}, inParams...)
 		}
@@ -1246,7 +1252,7 @@ func haveIdenticalUnderlyingType(outType, inType *types.Type, cmpTags bool) bool
 			return false
 		}
 		for i := range outType.Signature.Results {
-			if !haveIdenticalType(outType.Signature.Results[i], inType.Signature.Results[i], cmpTags) {
+			if !haveIdenticalType(outType.Signature.Results[i].Type, inType.Signature.Results[i].Type, cmpTags) {
 				return false
 			}
 		}
