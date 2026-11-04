@@ -215,18 +215,10 @@ func TestCanUseMemoryCopyConversion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			useUnsafe := equalMemoryTypes{}
-			for pair, fn := range tt.manualConversions {
-				copyOnly, _ := isCopyOnly(fn.CommentLines)
-				if copyOnly {
-					continue
-				}
-				useUnsafe.Skip(pair.inType, pair.outType)
-			}
 			g := &genConversion{
 				outputPackage:     tt.outputPackage,
 				manualConversions: tt.manualConversions,
-				useUnsafe:         useUnsafe,
+				useUnsafe:         equalMemoryTypes{},
 			}
 			gotOK, err := g.canUseMemoryCopyConversion(tt.in, tt.out)
 			if err != nil && err.Error() != tt.wantErr {

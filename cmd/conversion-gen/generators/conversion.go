@@ -1103,39 +1103,77 @@ func (g *genConversion) doStruct(inType, outType *types.Type, sw *generator.Snip
 // canUseMemoryCopyConversion reports whether two struct types can be converted
 // with a single unsafe memory copy rather than field-by-field conversion. This
 // returns true only for structs that are both memory-identical and do not have any
-// manual conversions (except copy-only conversions, which are allowed).
+// manual conversions (except copy-only conversions, which are allowed) anywhere
+// in the type, including in member types nested through structs, pointers,
+// maps, and slices.
 func (g *genConversion) canUseMemoryCopyConversion(inType, outType *types.Type) (bool, error) {
+	return g.canUseMemoryCopyConversionVisited(inType, outType, nil)
+}
+
+// canUseMemoryCopyConversionVisited is the recursive implementation of
+// canUseMemoryCopyConversion. visitedStack tracks the (inType, outType) pairs
+// already being checked further up the call stack, so that recursive types
+// (e.g. reachable through a pointer, map, or slice) don't cause infinite
+// recursion; a repeated pair is optimistically assumed OK, mirroring how
+// equalMemoryTypes.equal breaks cycles.
+func (g *genConversion) canUseMemoryCopyConversionVisited(inType, outType *types.Type, visitedStack []conversionPair) (bool, error) {
 	if !g.useUnsafe.Equal(inType, outType) {
 		return false, nil
 	}
-	for _, inMember := range inType.Members {
-		tagvals, err := extractTag(inMember.CommentLines)
-		if err != nil {
-			return false, err
-		}
-		if len(tagvals) > 0 && tagvals[0] == "false" {
-			return false, nil // opted out of conversion-gen
-		}
-		outMember, found := findMember(outType, inMember.Name)
-		if !found {
-			return false, nil
-		}
 
-		if namer.IsPrivateGoName(inMember.Name) && g.outputPackage != inType.Name.Package {
-			return false, nil
+	in, out := unwrapAlias(inType), unwrapAlias(outType)
+	pair := conversionPair{in, out}
+	for _, v := range visitedStack {
+		if v == pair {
+			return true, nil
 		}
-		if namer.IsPrivateGoName(outMember.Name) && g.outputPackage != outType.Name.Package {
-			return false, nil
-		}
-		// Bail out if there is a manual conversion other than 'copy-only'.
-		if function, ok := g.preexists(inMember.Type, outMember.Type); ok {
-			copyOnly, err := isCopyOnly(function.CommentLines)
-			if err != nil || !copyOnly {
+	}
+	visitedStack = append(visitedStack, pair)
+
+	switch in.Kind {
+	case types.Struct:
+		for _, inMember := range in.Members {
+			tagvals, err := extractTag(inMember.CommentLines)
+			if err != nil {
+				return false, err
+			}
+			if len(tagvals) > 0 && tagvals[0] == "false" {
+				return false, nil // opted out of conversion-gen
+			}
+			outMember, found := findMember(out, inMember.Name)
+			if !found {
+				return false, nil
+			}
+
+			if namer.IsPrivateGoName(inMember.Name) && g.outputPackage != in.Name.Package {
+				return false, nil
+			}
+			if namer.IsPrivateGoName(outMember.Name) && g.outputPackage != out.Name.Package {
+				return false, nil
+			}
+			// Bail out if there is a manual conversion other than 'copy-only'.
+			if function, ok := g.preexists(inMember.Type, outMember.Type); ok {
+				copyOnly, err := isCopyOnly(function.CommentLines)
+				if err != nil || !copyOnly {
+					return false, err
+				}
+			}
+			// Recurse to catch manual conversions on deeply-nested member types.
+			if ok, err := g.canUseMemoryCopyConversionVisited(inMember.Type, outMember.Type, visitedStack); err != nil || !ok {
 				return false, err
 			}
 		}
+		return true, nil
+	case types.Pointer, types.Slice:
+		return g.canUseMemoryCopyConversionVisited(in.Elem, out.Elem, visitedStack)
+	case types.Map:
+		if ok, err := g.canUseMemoryCopyConversionVisited(in.Key, out.Key, visitedStack); err != nil || !ok {
+			return false, err
+		}
+		return g.canUseMemoryCopyConversionVisited(in.Elem, out.Elem, visitedStack)
+	default:
+		return true, nil
 	}
-	return true, nil
 }
 
 func (g *genConversion) doPointer(inType, outType *types.Type, sw *generator.SnippetWriter) {
