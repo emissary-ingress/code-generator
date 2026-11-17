@@ -915,8 +915,22 @@ func (g *genConversion) generateFor(inType, outType *types.Type, functionOK bool
 		}
 	}
 
+	canUseFastConversion := true
+	switch inTypeResolved.Kind {
+	case types.Map, types.Slice, types.Pointer, types.Struct:
+		if g.useUnsafe.Equal(inTypeResolved, outTypeResolved) ||
+			isDirectlyAssignable(inType, outType) ||
+			isDirectlyConvertible(inType, outType) {
+			var err error
+			canUseFastConversion, err = g.canUseMemoryCopyConversion(inType, outType)
+			if err != nil {
+				klog.Errorf("Type %v: error checking for direct-copy conversion: %v", inType, err)
+			}
+		}
+	}
+
 	// (2) unsafe casting
-	if g.useUnsafe.Equal(inTypeResolved, outTypeResolved) {
+	if canUseFastConversion && g.useUnsafe.Equal(inTypeResolved, outTypeResolved) {
 		args := argsFromType(inType, outType).
 			With("Pointer", types.Ref("unsafe", "Pointer"))
 		switch inTypeResolved.Kind {
@@ -933,13 +947,13 @@ func (g *genConversion) generateFor(inType, outType *types.Type, functionOK bool
 	}
 
 	// (3) direct assignment
-	if isDirectlyAssignable(inType, outType) {
+	if canUseFastConversion && isDirectlyAssignable(inType, outType) {
 		sw.Do("*out = *in\n", nil)
 		return
 	}
 
 	// (4) direct conversion
-	if isDirectlyConvertible(inType, outType) {
+	if canUseFastConversion && isDirectlyConvertible(inType, outType) {
 		sw.Do("*out = $.|raw$(*in)\n", outType)
 		return
 	}
@@ -1119,6 +1133,13 @@ func (g *genConversion) canUseMemoryCopyConversion(inType, outType *types.Type) 
 func (g *genConversion) canUseMemoryCopyConversionVisited(inType, outType *types.Type, visitedStack []conversionPair) (bool, error) {
 	if !g.useUnsafe.Equal(inType, outType) {
 		return false, nil
+	}
+
+	if function, ok := g.preexists(inType, outType); ok {
+		copyOnly, err := isCopyOnly(function.CommentLines)
+		if err != nil || !copyOnly {
+			return false, err
+		}
 	}
 
 	in, out := unwrapAlias(inType), unwrapAlias(outType)
